@@ -24,18 +24,8 @@ Hace GRANT ROL_OPERADOR TO OPERADOR y GRANT ROL_ADMINISTRADOR TO ADMINISTRADOR. 
 -- CONEXIÓN REQUERIDA: SYSTEM
 -- Servicio: XEPDB1 (Oracle XE 21c) o FREE (Oracle 23c Free)
 -- =============================================================================
--- QUÉ HACE ESTE SCRIPT:
---   1. Limpia ejecuciones anteriores
---   2. Crea tablespaces (requiere DBA)
---   3. Crea TAXIRAPIDO_APP — usuario dueño del modelo
---   4. Crea OPERADOR, ADMINISTRADOR, CONDUCTOR — usuarios de negocio
---      NOTA: CREATE USER es privilegio exclusivo de DBA.
---      Por eso los 4 usuarios se crean aquí, desde SYSTEM.
--- =============================================================================
 
--- -------------------------------------------------------
 -- PARTE A: LIMPIEZA TOTAL
--- -------------------------------------------------------
 BEGIN
     FOR u IN (SELECT username FROM dba_users
               WHERE username IN ('TAXIRAPIDO_APP','OPERADOR','ADMINISTRADOR','CONDUCTOR')) LOOP
@@ -43,7 +33,6 @@ BEGIN
     END LOOP;
 END;
 /
-
 BEGIN
     FOR r IN (SELECT role FROM dba_roles
               WHERE role IN ('ROL_OPERADOR','ROL_ADMINISTRADOR')) LOOP
@@ -51,7 +40,6 @@ BEGIN
     END LOOP;
 END;
 /
-
 BEGIN
     FOR t IN (SELECT tablespace_name FROM dba_tablespaces
               WHERE tablespace_name IN ('TS_OPERACIONES','TS_ADMIN','TS_TEMP_TAXI')) LOOP
@@ -64,10 +52,7 @@ BEGIN
 END;
 /
 
--- -------------------------------------------------------
 -- PARTE B: TABLESPACES
--- Separación física: operaciones vs. administración
--- -------------------------------------------------------
 CREATE TABLESPACE TS_OPERACIONES
 DATAFILE 'D:\Oracle\oradata\TAXIRAPIDO\ts_operaciones01.dbf'
 SIZE 200M AUTOEXTEND ON NEXT 20M MAXSIZE 2G
@@ -82,9 +67,12 @@ CREATE TEMPORARY TABLESPACE TS_TEMP_TAXI
 TEMPFILE 'D:\Oracle\oradata\TAXIRAPIDO\ts_temp01.dbf'
 SIZE 100M AUTOEXTEND ON NEXT 10M MAXSIZE 500M;
 
--- -------------------------------------------------------
 -- PARTE C: USUARIO DUEÑO DEL MODELO DE NEGOCIO
--- -------------------------------------------------------
+-- CORRECCIÓN: eliminado GRANT ANY OBJECT PRIVILEGE.
+-- En Oracle el propietario de un objeto puede hacer GRANT sobre sus propios
+-- objetos de forma implícita sin necesitar ese privilegio adicional.
+-- GRANT ANY OBJECT PRIVILEGE habilitaría GRANTs sobre objetos de CUALQUIER
+-- esquema, violando el principio de mínimo privilegio.
 CREATE USER TAXIRAPIDO_APP
 IDENTIFIED BY TaxiApp2024
 DEFAULT TABLESPACE TS_OPERACIONES
@@ -92,13 +80,12 @@ TEMPORARY TABLESPACE TS_TEMP_TAXI
 QUOTA UNLIMITED ON TS_OPERACIONES
 QUOTA UNLIMITED ON TS_ADMIN;
 
-GRANT CREATE SESSION            TO TAXIRAPIDO_APP;
-GRANT CREATE TABLE              TO TAXIRAPIDO_APP;
-GRANT CREATE SEQUENCE           TO TAXIRAPIDO_APP;
-GRANT CREATE TRIGGER            TO TAXIRAPIDO_APP;
-GRANT CREATE VIEW               TO TAXIRAPIDO_APP;
-GRANT CREATE ROLE               TO TAXIRAPIDO_APP;
-GRANT GRANT ANY OBJECT PRIVILEGE TO TAXIRAPIDO_APP;
+GRANT CREATE SESSION  TO TAXIRAPIDO_APP;
+GRANT CREATE TABLE    TO TAXIRAPIDO_APP;
+GRANT CREATE SEQUENCE TO TAXIRAPIDO_APP;
+GRANT CREATE TRIGGER  TO TAXIRAPIDO_APP;
+GRANT CREATE VIEW     TO TAXIRAPIDO_APP;
+GRANT CREATE ROLE     TO TAXIRAPIDO_APP;
 
 -- Acceso al diccionario de datos para verificaciones del taller
 GRANT SELECT ON DBA_TABLESPACES TO TAXIRAPIDO_APP;
@@ -110,44 +97,30 @@ GRANT SELECT ON DBA_ROLE_PRIVS  TO TAXIRAPIDO_APP;
 GRANT SELECT ON DBA_TAB_PRIVS   TO TAXIRAPIDO_APP;
 GRANT SELECT ON DBA_TS_QUOTAS   TO TAXIRAPIDO_APP;
 
--- -------------------------------------------------------
--- PARTE D: USUARIOS DE NEGOCIO
--- CREATE USER requiere DBA → se crean aquí desde SYSTEM
--- Los GRANT de permisos sobre objetos del esquema
--- se hacen en el SCRIPT 02 (una vez que los objetos existen)
--- -------------------------------------------------------
-
--- Operador: gestiona la operación diaria (despacho)
+-- PARTE D: USUARIOS DE NEGOCIO (CREATE USER requiere DBA)
 CREATE USER OPERADOR
 IDENTIFIED BY Operador2024
 DEFAULT TABLESPACE TS_OPERACIONES
 TEMPORARY TABLESPACE TS_TEMP_TAXI
 QUOTA 100M ON TS_OPERACIONES;
-
 GRANT CREATE SESSION TO OPERADOR;
 
--- Administrador: gerencia, acceso total
 CREATE USER ADMINISTRADOR
 IDENTIFIED BY Admin2024
 DEFAULT TABLESPACE TS_ADMIN
 TEMPORARY TABLESPACE TS_TEMP_TAXI
 QUOTA UNLIMITED ON TS_ADMIN
 QUOTA 50M ON TS_OPERACIONES;
-
 GRANT CREATE SESSION TO ADMINISTRADOR;
 
--- Conductor: acceso mínimo — solo sus propios viajes
 CREATE USER CONDUCTOR
 IDENTIFIED BY Conductor2024
 DEFAULT TABLESPACE TS_OPERACIONES
 TEMPORARY TABLESPACE TS_TEMP_TAXI
 QUOTA 0 ON TS_OPERACIONES;
-
 GRANT CREATE SESSION TO CONDUCTOR;
 
--- -------------------------------------------------------
--- VERIFICACIÓN: confirmar que los 4 usuarios existen
--- -------------------------------------------------------
+-- VERIFICACIÓN
 SELECT USERNAME, DEFAULT_TABLESPACE, TEMPORARY_TABLESPACE, ACCOUNT_STATUS
 FROM DBA_USERS
 WHERE USERNAME IN ('TAXIRAPIDO_APP','OPERADOR','ADMINISTRADOR','CONDUCTOR')
@@ -157,11 +130,7 @@ SELECT TABLESPACE_NAME, STATUS, CONTENTS
 FROM DBA_TABLESPACES
 WHERE TABLESPACE_NAME LIKE 'TS_%'
 ORDER BY TABLESPACE_NAME;
-
--- =============================================================================
--- ✅ SCRIPT 00 COMPLETADO
--- Siguiente: conectarse como TAXIRAPIDO_APP y ejecutar SCRIPT 01
--- =============================================================================
+-- ✅ Siguiente: TAXIRAPIDO_APP → SCRIPT 01
 ```
 # SCRIPT 01
 ```
@@ -170,14 +139,12 @@ ORDER BY TABLESPACE_NAME;
 -- CONEXIÓN REQUERIDA: TAXIRAPIDO_APP / TaxiApp2024
 -- Servicio: XEPDB1 (Oracle XE 21c) o FREE (Oracle 23c Free)
 -- =============================================================================
--- QUÉ HACE ESTE SCRIPT:
---   BLOQUE 1 → ARQUITECTURA: tablas en tablespaces correctos
---   BLOQUE 2 → SECUENCIAS:   generación automática de IDs + triggers
---   BLOQUE 3 → DATOS:        inserción de registros de prueba
---   BLOQUE 4 → VISTAS:       consultas seguras por rol
--- Los GRANTS a usuarios de negocio van en SCRIPT 02 (desde SYSTEM)
--- porque GRANT ANY OBJECT PRIVILEGE no alcanza para GRANT CREATE SESSION
--- ni para administrar cuotas de otros usuarios.
+-- BLOQUES:
+--   1 → ARQUITECTURA: tablas en tablespaces separados
+--   2 → SECUENCIAS + TRIGGERS: IDs automáticos
+--   3 → DATOS: registros de prueba
+--   4 → VISTAS: consultas seguras por rol
+--   5 → ROLES: permisos agrupados por función
 -- =============================================================================
 
 
@@ -186,17 +153,19 @@ ORDER BY TABLESPACE_NAME;
 -- Autor: ARTEAGA GARCIA CARLOS ANDRES
 -- =============================================================================
 
+-- Tablas operacionales → TS_OPERACIONES
 CREATE TABLE CONDUCTORES (
     ID_CONDUCTOR    NUMBER          PRIMARY KEY,
     NOMBRE          VARCHAR2(100)   NOT NULL,
     LICENCIA        VARCHAR2(20)    UNIQUE NOT NULL,
     TELEFONO        VARCHAR2(15),
     USUARIO_ORACLE  VARCHAR2(50),
+    -- USUARIO_ORACLE: guarda el nombre del usuario Oracle del conductor.
+    -- La VISTA_VIAJES_CONDUCTOR filtra por esta columna usando SYS_CONTEXT,
+    -- garantizando que cada conductor vea solo sus propios viajes.
     ESTADO          VARCHAR2(20)    DEFAULT 'ACTIVO',
     FECHA_REGISTRO  DATE            DEFAULT SYSDATE
 ) TABLESPACE TS_OPERACIONES;
--- USUARIO_ORACLE almacena el nombre del usuario Oracle del conductor,
--- lo que permite que la VISTA_VIAJES_CONDUCTOR filtre por sesión activa.
 
 CREATE TABLE VEHICULOS (
     ID_VEHICULO   NUMBER       PRIMARY KEY,
@@ -222,6 +191,7 @@ CREATE TABLE VIAJES (
     FOREIGN KEY (ID_VEHICULO)  REFERENCES VEHICULOS(ID_VEHICULO)
 ) TABLESPACE TS_OPERACIONES;
 
+-- Tabla financiera → TS_ADMIN (separación física de datos sensibles)
 CREATE TABLE FACTURAS (
     ID_FACTURA     NUMBER        PRIMARY KEY,
     ID_VIAJE       NUMBER        NOT NULL,
@@ -229,9 +199,14 @@ CREATE TABLE FACTURAS (
     MONTO_TOTAL    NUMBER(10,2),
     IMPUESTOS      NUMBER(10,2),
     METODO_PAGO    VARCHAR2(20),
-    FOREIGN KEY (ID_VIAJE) REFERENCES VIAJES(ID_VIAJE)
+    FOREIGN KEY (ID_VIAJE) REFERENCES VIAJES(ID_VIAJE),
+    -- CORRECCIÓN aplicada: constraint UNIQUE sobre ID_VIAJE.
+    -- Regla de negocio: 1 viaje = 1 factura exactamente.
+    -- Sin esta restricción, Oracle permitiría insertar dos facturas para
+    -- el mismo viaje, lo que generaría inconsistencia financiera y
+    -- problemas con la DIAN. Esta línea fuerza la regla a nivel de motor.
+    CONSTRAINT UK_FACTURAS_ID_VIAJE UNIQUE (ID_VIAJE)
 ) TABLESPACE TS_ADMIN;
--- Facturas en TS_ADMIN: separación física de datos financieros
 
 -- Verificación de arquitectura
 SELECT TABLE_NAME AS "Tabla", TABLESPACE_NAME AS "Almacenada en"
@@ -240,9 +215,9 @@ WHERE TABLE_NAME IN ('CONDUCTORES','VEHICULOS','VIAJES','FACTURAS')
 ORDER BY TABLESPACE_NAME, TABLE_NAME;
 
 SELECT TABLESPACE_NAME AS "Tablespace",
-       ROUND(BYTES/1024/1024,2) AS "Tamaño (MB)",
+       ROUND(BYTES/1024/1024,2)    AS "Tamaño (MB)",
        ROUND(MAXBYTES/1024/1024,2) AS "Máximo (MB)",
-       AUTOEXTENSIBLE AS "Autoextensible"
+       AUTOEXTENSIBLE               AS "Autoextensible"
 FROM DBA_DATA_FILES
 WHERE TABLESPACE_NAME IN ('TS_OPERACIONES','TS_ADMIN')
 ORDER BY TABLESPACE_NAME;
@@ -253,33 +228,34 @@ ORDER BY TABLESPACE_NAME;
 -- Autor: CORREA TORRES BRAYAN ALEXIS
 -- =============================================================================
 
--- Conductores: hasta 999.999, cache 20 para contrataciones en lote
+-- Conductores: hasta 999.999, CACHE 20 para contrataciones en lote
 CREATE SEQUENCE SEQ_CONDUCTORES
 START WITH 1    INCREMENT BY 1
 MINVALUE 1      MAXVALUE 999999
 NOCYCLE         CACHE 20;
 
--- Vehículos: flota moderada, cache pequeño
+-- Vehículos: flota moderada, CACHE pequeño
 CREATE SEQUENCE SEQ_VEHICULOS
 START WITH 1    INCREMENT BY 1
 MINVALUE 1      MAXVALUE 999999
 NOCYCLE         CACHE 10;
 
--- Viajes: ~3.000/día, rango amplio, cache grande para rendimiento
+-- Viajes: ~3.000/día → rango amplio, CACHE grande para rendimiento
 CREATE SEQUENCE SEQ_VIAJES
 START WITH 1000 INCREMENT BY 1
 MINVALUE 1      MAXVALUE 99999999
 NOCYCLE         CACHE 50;
+-- Inicia en 1000 para distinguir viajes históricos de nuevos registros
 
--- Facturas: ORDER garantiza consecutividad legal obligatoria
+-- Facturas: ORDER garantiza consecutividad legal exigida por la DIAN
 CREATE SEQUENCE SEQ_FACTURAS
 START WITH 100000 INCREMENT BY 1
 MINVALUE 100000   MAXVALUE 99999999
 NOCYCLE           CACHE 30
 ORDER;
 
--- Triggers: el ID se asigna automáticamente sin que el operador
--- tenga que escribir NEXTVAL en cada INSERT.
+-- Triggers: asignan el ID automáticamente en cada INSERT
+-- El operador no necesita escribir SEQ_X.NEXTVAL en el INSERT
 CREATE OR REPLACE TRIGGER TRG_CONDUCTORES_ID
 BEFORE INSERT ON CONDUCTORES FOR EACH ROW
 BEGIN
@@ -317,14 +293,18 @@ END;
 /
 
 -- Verificación de secuencias
-SELECT SEQUENCE_NAME AS "Secuencia", MIN_VALUE AS "Mín", MAX_VALUE AS "Máx",
-       LAST_NUMBER AS "Último Nro", CACHE_SIZE AS "Cache"
-FROM USER_SEQUENCES WHERE SEQUENCE_NAME LIKE 'SEQ_%'
+SELECT SEQUENCE_NAME AS "Secuencia",
+       MIN_VALUE      AS "Mín",
+       MAX_VALUE      AS "Máx",
+       LAST_NUMBER    AS "Último Nro",
+       CACHE_SIZE     AS "Cache"
+FROM USER_SEQUENCES
+WHERE SEQUENCE_NAME LIKE 'SEQ_%'
 ORDER BY SEQUENCE_NAME;
 
 
 -- =============================================================================
--- BLOQUE 3: INSERCIÓN DE DATOS DE PRUEBA
+-- BLOQUE 3: DATOS DE PRUEBA
 -- Los triggers asignan IDs automáticamente — no se especifica ID en el INSERT
 -- =============================================================================
 
@@ -358,6 +338,8 @@ VALUES (3,3,'Envigado','Universidad de Antioquia',18.7,32000,'EN_CURSO');
 INSERT INTO VIAJES (ID_CONDUCTOR,ID_VEHICULO,ORIGEN,DESTINO,DISTANCIA_KM,TARIFA,ESTADO)
 VALUES (1,1,'El Poblado','Estadio Atanasio Girardot',15.2,28000,'EN_CURSO');
 
+-- Facturas: una por viaje completado (la restricción UK_FACTURAS_ID_VIAJE
+-- rechazará cualquier intento de insertar una segunda factura para el mismo viaje)
 INSERT INTO FACTURAS (ID_VIAJE,MONTO_TOTAL,IMPUESTOS,METODO_PAGO)
 VALUES (1000,45000,7200,'EFECTIVO');
 
@@ -366,7 +348,7 @@ VALUES (1001,22000,3520,'TARJETA');
 
 COMMIT;
 
--- Inserción masiva: simula un día de operaciones
+-- Inserción masiva simulando un día de operaciones
 BEGIN
     FOR i IN 1..10 LOOP
         INSERT INTO VIAJES (ID_CONDUCTOR,ID_VEHICULO,ORIGEN,DESTINO,
@@ -384,21 +366,26 @@ BEGIN
 END;
 /
 
--- Verificar datos insertados
+-- Verificar datos
 SELECT ID_CONDUCTOR, NOMBRE, USUARIO_ORACLE, ESTADO FROM CONDUCTORES;
 SELECT ID_VEHICULO, PLACA, MARCA, MODELO FROM VEHICULOS;
 SELECT COUNT(*) AS "Total Viajes" FROM VIAJES;
 SELECT ID_FACTURA, ID_VIAJE, MONTO_TOTAL, METODO_PAGO FROM FACTURAS;
 
+-- Demostrar que la restricción UK_FACTURAS_ID_VIAJE funciona:
+-- Este INSERT debe fallar con ORA-00001 (unique constraint violated):
+-- INSERT INTO FACTURAS (ID_VIAJE,MONTO_TOTAL,IMPUESTOS,METODO_PAGO)
+-- VALUES (1000,99999,9999,'EFECTIVO');
+
 
 -- =============================================================================
 -- BLOQUE 4: VISTAS
 -- Autor: PATIÑO JARAMILLO CRISTIAN ALBIERY
--- NOTA: Las vistas se crean ANTES de que SCRIPT 02 haga los GRANTS,
--- así cuando lleguen los GRANT los objetos ya existen.
+-- Se crean ANTES de los roles para que los GRANTs del Bloque 5
+-- encuentren los objetos ya existentes.
 -- =============================================================================
 
--- Vista 1: Viajes en curso — para operadores de despacho
+-- Vista 1: Viajes en curso — pantalla de despacho para operadores
 CREATE OR REPLACE VIEW VISTA_VIAJES_ACTIVOS AS
 SELECT V.ID_VIAJE                                   AS "ID Viaje",
        C.NOMBRE                                     AS "Conductor",
@@ -416,8 +403,9 @@ JOIN CONDUCTORES C  ON V.ID_CONDUCTOR = C.ID_CONDUCTOR
 JOIN VEHICULOS   VH ON V.ID_VEHICULO  = VH.ID_VEHICULO
 WHERE V.ESTADO = 'EN_CURSO';
 
--- Vista 2: Viajes del conductor conectado
--- Filtra por USUARIO_ORACLE = SESSION_USER (usuario de sesión activa)
+-- Vista 2: Viajes del conductor conectado (seguridad a nivel de fila)
+-- SYS_CONTEXT('USERENV','SESSION_USER') retorna el usuario Oracle activo.
+-- Al cruzarlo con USUARIO_ORACLE, cada conductor solo ve sus propios viajes.
 CREATE OR REPLACE VIEW VISTA_VIAJES_CONDUCTOR AS
 SELECT V.ID_VIAJE                                   AS "ID Viaje",
        V.ORIGEN                                     AS "Origen",
@@ -432,60 +420,60 @@ WHERE UPPER(C.USUARIO_ORACLE) = UPPER(SYS_CONTEXT('USERENV','SESSION_USER'));
 
 -- Vista 3: Reporte financiero — exclusiva para administradores
 CREATE OR REPLACE VIEW VISTA_REPORTES_FINANCIEROS AS
-SELECT F.ID_FACTURA                                 AS "N° Factura",
-       TO_CHAR(F.FECHA_EMISION,'DD/MM/YYYY')        AS "Fecha Emisión",
-       C.NOMBRE                                     AS "Conductor",
-       V.ORIGEN                                     AS "Origen",
-       V.DESTINO                                    AS "Destino",
-       V.DISTANCIA_KM                               AS "Distancia (Km)",
-       F.MONTO_TOTAL                                AS "Monto Total ($)",
-       F.IMPUESTOS                                  AS "IVA ($)",
-       (F.MONTO_TOTAL - F.IMPUESTOS)               AS "Subtotal ($)",
-       F.METODO_PAGO                                AS "Método de Pago"
+SELECT F.ID_FACTURA                                AS "N° Factura",
+       TO_CHAR(F.FECHA_EMISION,'DD/MM/YYYY')       AS "Fecha Emisión",
+       C.NOMBRE                                    AS "Conductor",
+       V.ORIGEN                                    AS "Origen",
+       V.DESTINO                                   AS "Destino",
+       V.DISTANCIA_KM                              AS "Distancia (Km)",
+       F.MONTO_TOTAL                               AS "Monto Total ($)",
+       F.IMPUESTOS                                 AS "IVA ($)",
+       (F.MONTO_TOTAL - F.IMPUESTOS)              AS "Subtotal ($)",
+       F.METODO_PAGO                               AS "Método de Pago"
 FROM FACTURAS F
 JOIN VIAJES      V ON F.ID_VIAJE     = V.ID_VIAJE
 JOIN CONDUCTORES C ON V.ID_CONDUCTOR = C.ID_CONDUCTOR
 ORDER BY F.FECHA_EMISION DESC;
 
--- Vista 4: Disponibilidad de flota — para asignación de viajes
+-- Vista 4: Disponibilidad de flota — para asignación de nuevos viajes
 CREATE OR REPLACE VIEW VISTA_DISPONIBILIDAD_VEHICULOS AS
-SELECT VH.ID_VEHICULO                               AS "ID Vehículo",
-       VH.PLACA                                     AS "Placa",
-       VH.MARCA||' '||VH.MODELO                    AS "Vehículo",
-       VH.ANIO                                      AS "Año",
-       C.NOMBRE                                     AS "Conductor Asignado",
-       C.TELEFONO                                   AS "Teléfono",
+SELECT VH.ID_VEHICULO                              AS "ID Vehículo",
+       VH.PLACA                                    AS "Placa",
+       VH.MARCA||' '||VH.MODELO                   AS "Vehículo",
+       VH.ANIO                                     AS "Año",
+       C.NOMBRE                                    AS "Conductor Asignado",
+       C.TELEFONO                                  AS "Teléfono",
        CASE
            WHEN EXISTS (SELECT 1 FROM VIAJES V2
                         WHERE V2.ID_VEHICULO = VH.ID_VEHICULO
                           AND V2.ESTADO = 'EN_CURSO')
            THEN 'OCUPADO' ELSE 'DISPONIBLE'
-       END                                          AS "Disponibilidad"
+       END                                         AS "Disponibilidad"
 FROM VEHICULOS VH
 JOIN CONDUCTORES C ON VH.ID_CONDUCTOR = C.ID_CONDUCTOR
 ORDER BY "Disponibilidad", VH.PLACA;
 
 -- Vista 5: Rendimiento por conductor — para gerencia
 CREATE OR REPLACE VIEW VISTA_RENDIMIENTO_CONDUCTORES AS
-SELECT C.ID_CONDUCTOR                                           AS "ID",
-       C.NOMBRE                                                 AS "Conductor",
-       C.LICENCIA                                               AS "Licencia",
-       C.ESTADO                                                 AS "Estado",
-       COUNT(V.ID_VIAJE)                                        AS "Total Viajes",
-       NVL(ROUND(SUM(V.TARIFA),2),0)                           AS "Ingresos Totales ($)",
-       NVL(ROUND(AVG(V.TARIFA),2),0)                           AS "Tarifa Promedio ($)",
-       NVL(ROUND(SUM(V.DISTANCIA_KM),2),0)                    AS "KM Totales",
-       COUNT(CASE WHEN V.ESTADO='COMPLETADO' THEN 1 END)        AS "Viajes Completados",
-       COUNT(CASE WHEN V.ESTADO='EN_CURSO'   THEN 1 END)        AS "Viajes en Curso"
+SELECT C.ID_CONDUCTOR                                          AS "ID",
+       C.NOMBRE                                                AS "Conductor",
+       C.LICENCIA                                              AS "Licencia",
+       C.ESTADO                                                AS "Estado",
+       COUNT(V.ID_VIAJE)                                       AS "Total Viajes",
+       NVL(ROUND(SUM(V.TARIFA),2),0)                          AS "Ingresos Totales ($)",
+       NVL(ROUND(AVG(V.TARIFA),2),0)                          AS "Tarifa Promedio ($)",
+       NVL(ROUND(SUM(V.DISTANCIA_KM),2),0)                   AS "KM Totales",
+       COUNT(CASE WHEN V.ESTADO='COMPLETADO' THEN 1 END)       AS "Viajes Completados",
+       COUNT(CASE WHEN V.ESTADO='EN_CURSO'   THEN 1 END)       AS "Viajes en Curso"
 FROM CONDUCTORES C
 LEFT JOIN VIAJES V ON C.ID_CONDUCTOR = V.ID_CONDUCTOR
 GROUP BY C.ID_CONDUCTOR, C.NOMBRE, C.LICENCIA, C.ESTADO
 ORDER BY "Ingresos Totales ($)" DESC;
 
---Vista 6: Vista Vehiculo Conductor
+-- Vista 6: Vehículo asignado al conductor conectado
 CREATE OR REPLACE VIEW VISTA_VEHICULO_CONDUCTOR AS
 SELECT VH.ID_VEHICULO, VH.PLACA, VH.MARCA, VH.MODELO, VH.ANIO
-FROM VEHICULOS VH
+FROM VEHICULOS   VH
 JOIN CONDUCTORES C ON C.ID_CONDUCTOR = VH.ID_CONDUCTOR
 WHERE UPPER(C.USUARIO_ORACLE) = UPPER(SYS_CONTEXT('USERENV','SESSION_USER'));
 
@@ -495,7 +483,7 @@ FROM USER_VIEWS
 WHERE VIEW_NAME LIKE 'VISTA_%'
 ORDER BY VIEW_NAME;
 
--- Prueba de vistas (ejecutadas como TAXIRAPIDO_APP)
+-- Pruebas como TAXIRAPIDO_APP
 SELECT * FROM VISTA_VIAJES_ACTIVOS;
 SELECT * FROM VISTA_DISPONIBILIDAD_VEHICULOS;
 SELECT * FROM VISTA_RENDIMIENTO_CONDUCTORES;
@@ -503,28 +491,27 @@ SELECT * FROM VISTA_REPORTES_FINANCIEROS;
 
 
 -- =============================================================================
--- BLOQUE 5: ROLES (creación y asignación de permisos sobre objetos propios)
+-- BLOQUE 5: ROLES Y PERMISOS SOBRE OBJETOS PROPIOS
 -- Autor: GONZALEZ ZAPATA TOMAS
--- TAXIRAPIDO_APP puede crear roles y hacer GRANT sobre sus propios objetos.
--- Lo que NO puede hacer es CREATE USER ni GRANT CREATE SESSION
--- (esos van en SCRIPT 02 desde SYSTEM).
+-- TAXIRAPIDO_APP es dueño de los objetos → puede hacer GRANT sobre ellos
+-- sin GRANT ANY OBJECT PRIVILEGE (comportamiento estándar de Oracle).
 -- =============================================================================
 
 CREATE ROLE ROL_OPERADOR;
 
--- El operador gestiona la parte operativa — no ve finanzas
+-- Operador: gestión operativa completa, SIN acceso a datos financieros
 GRANT SELECT, INSERT, UPDATE, DELETE ON CONDUCTORES TO ROL_OPERADOR;
 GRANT SELECT, INSERT, UPDATE, DELETE ON VEHICULOS   TO ROL_OPERADOR;
 GRANT SELECT, INSERT, UPDATE, DELETE ON VIAJES      TO ROL_OPERADOR;
-GRANT SELECT ON SEQ_VIAJES       TO ROL_OPERADOR;
-GRANT SELECT ON SEQ_CONDUCTORES  TO ROL_OPERADOR;
-GRANT SELECT ON SEQ_VEHICULOS    TO ROL_OPERADOR;
+GRANT SELECT ON SEQ_VIAJES      TO ROL_OPERADOR;
+GRANT SELECT ON SEQ_CONDUCTORES TO ROL_OPERADOR;
+GRANT SELECT ON SEQ_VEHICULOS   TO ROL_OPERADOR;
 GRANT SELECT ON VISTA_VIAJES_ACTIVOS           TO ROL_OPERADOR;
 GRANT SELECT ON VISTA_DISPONIBILIDAD_VEHICULOS TO ROL_OPERADOR;
 
 CREATE ROLE ROL_ADMINISTRADOR;
 
--- El administrador tiene acceso total incluido finanzas
+-- Administrador: acceso total incluido finanzas y todos los reportes
 GRANT SELECT, INSERT, UPDATE, DELETE ON CONDUCTORES TO ROL_ADMINISTRADOR;
 GRANT SELECT, INSERT, UPDATE, DELETE ON VEHICULOS   TO ROL_ADMINISTRADOR;
 GRANT SELECT, INSERT, UPDATE, DELETE ON VIAJES      TO ROL_ADMINISTRADOR;
@@ -539,19 +526,16 @@ GRANT SELECT ON VISTA_DISPONIBILIDAD_VEHICULOS TO ROL_ADMINISTRADOR;
 GRANT SELECT ON VISTA_VIAJES_CONDUCTOR         TO ROL_ADMINISTRADOR;
 GRANT SELECT ON VISTA_RENDIMIENTO_CONDUCTORES  TO ROL_ADMINISTRADOR;
 
--- Permisos individuales para el CONDUCTOR (no usa rol, acceso mínimo)
-GRANT SELECT ON VISTA_VIAJES_CONDUCTOR TO CONDUCTOR;
+-- Conductor: acceso mínimo — solo sus dos vistas personales
+GRANT SELECT ON VISTA_VIAJES_CONDUCTOR   TO CONDUCTOR;
 GRANT SELECT ON VISTA_VEHICULO_CONDUCTOR TO CONDUCTOR;
 
--- Verificación de roles
-SELECT GRANTED_ROLE AS ROLE
+-- Verificación
+SELECT GRANTED_ROLE AS "Roles creados por TAXIRAPIDO_APP"
 FROM USER_ROLE_PRIVS
 ORDER BY GRANTED_ROLE;
 
--- =============================================================================
--- ✅ SCRIPT 01 COMPLETADO
--- Siguiente: conectarse como SYSTEM y ejecutar SCRIPT 02
--- =============================================================================
+-- ✅ Siguiente: SYSTEM → SCRIPT 02
 ```
 # SCRIPT 02
 ```
@@ -560,30 +544,15 @@ ORDER BY GRANTED_ROLE;
 -- CONEXIÓN REQUERIDA: SYSTEM
 -- Servicio: XEPDB1 (Oracle XE 21c) o FREE (Oracle 23c Free)
 -- =============================================================================
--- QUÉ HACE ESTE SCRIPT:
---   1. Asigna roles a usuarios de negocio (requiere DBA)
---   2. Verifica el sistema completo de usuarios y permisos
---   3. Muestra el reporte ejecutivo integrado de los 4 temas
--- Por qué desde SYSTEM: GRANT <rol_del_sistema> TO <usuario>
--- requiere privilegios de DBA cuando el rol es externo al esquema.
--- =============================================================================
 
--- -------------------------------------------------------
 -- PARTE A: ASIGNAR ROLES A USUARIOS DE NEGOCIO
--- -------------------------------------------------------
-
--- OPERADOR: recibe el rol operativo creado por TAXIRAPIDO_APP
+-- Requiere DBA porque los roles pertenecen a TAXIRAPIDO_APP
 GRANT ROL_OPERADOR      TO OPERADOR;
-
--- ADMINISTRADOR: recibe el rol de administración completo
 GRANT ROL_ADMINISTRADOR TO ADMINISTRADOR;
 
--- -------------------------------------------------------
--- PARTE B: VERIFICACIONES COMPLETAS DEL SISTEMA
--- Autor: GONZALEZ ZAPATA TOMAS (Usuarios)
--- -------------------------------------------------------
+-- PARTE B: VERIFICACIONES — Autor: GONZALEZ ZAPATA TOMAS (Usuarios)
 
--- Ver todos los usuarios del sistema TaxiRápido
+-- Estado de los 4 usuarios del sistema
 SELECT USERNAME          AS "Usuario",
        DEFAULT_TABLESPACE AS "Tablespace Defecto",
        TEMPORARY_TABLESPACE AS "Tablespace Temp",
@@ -592,20 +561,20 @@ FROM DBA_USERS
 WHERE USERNAME IN ('TAXIRAPIDO_APP','OPERADOR','ADMINISTRADOR','CONDUCTOR')
 ORDER BY USERNAME;
 
--- Ver roles de negocio existentes
+-- Roles de negocio existentes
 SELECT ROLE AS "Roles del Sistema"
 FROM DBA_ROLES
 WHERE ROLE LIKE 'ROL_%'
 ORDER BY ROLE;
 
--- Ver qué rol tiene cada usuario
+-- Qué rol tiene cada usuario
 SELECT GRANTEE      AS "Usuario",
        GRANTED_ROLE AS "Rol Asignado"
 FROM DBA_ROLE_PRIVS
 WHERE GRANTEE IN ('OPERADOR','ADMINISTRADOR','CONDUCTOR')
 ORDER BY GRANTEE;
 
--- Ver permisos a nivel de objeto por usuario
+-- Permisos a nivel de objeto (GRANTs directos, no por rol)
 SELECT GRANTEE    AS "Usuario",
        PRIVILEGE  AS "Permiso",
        TABLE_NAME AS "Objeto"
@@ -614,7 +583,7 @@ WHERE GRANTEE IN ('OPERADOR','ADMINISTRADOR','CONDUCTOR')
   AND OWNER = 'TAXIRAPIDO_APP'
 ORDER BY GRANTEE, TABLE_NAME;
 
--- Ver cuotas de espacio en disco por usuario
+-- Cuotas de espacio en disco por usuario
 SELECT USERNAME,
        TABLESPACE_NAME,
        CASE WHEN MAX_BYTES = -1 THEN 'UNLIMITED'
@@ -624,113 +593,102 @@ FROM DBA_TS_QUOTAS
 WHERE USERNAME IN ('TAXIRAPIDO_APP','OPERADOR','ADMINISTRADOR','CONDUCTOR')
 ORDER BY USERNAME, TABLESPACE_NAME;
 
--- -------------------------------------------------------
--- PARTE C: PRUEBAS DE SEGURIDAD — DEMOSTRACIÓN DEL CONTROL DE ACCESO
--- -------------------------------------------------------
--- INSTRUCCIÓN PARA EL VIDEO:
--- Cada bloque de CONNECT a continuación se prueba abriendo
--- una nueva hoja de trabajo en SQL Developer con esa conexión.
--- Los comentarios "DEBE funcionar" / "NO debe funcionar"
--- muestran el comportamiento esperado de cada rol.
+-- Verificar constraint UNIQUE en FACTURAS
+SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE, TABLE_NAME
+FROM DBA_CONSTRAINTS
+WHERE OWNER = 'TAXIRAPIDO_APP'
+  AND TABLE_NAME = 'FACTURAS'
+ORDER BY CONSTRAINT_TYPE;
 
--- >> COMO OPERADOR (abrir nueva hoja con conexión OPERADOR)
--- CONNECT OPERADOR/Operador2024@XEPDB1
---
+-- PARTE C: PRUEBAS DE SEGURIDAD
+-- Abrir una nueva hoja de trabajo en SQL Developer con cada conexión.
+-- Los resultados esperados están documentados como comentarios.
+
+-- >> CONEXIÓN: OPERADOR / Operador2024 / XEPDB1
 -- SELECT * FROM TAXIRAPIDO_APP.CONDUCTORES WHERE ROWNUM <= 3;
--- → DEBE funcionar: el operador gestiona conductores ✓
+-- → Devuelve datos ✓ (tiene SELECT por ROL_OPERADOR)
 --
 -- INSERT INTO TAXIRAPIDO_APP.VIAJES
 --     (ID_CONDUCTOR,ID_VEHICULO,ORIGEN,DESTINO,TARIFA,ESTADO)
 -- VALUES (1,1,'Bello','Centro',20000,'EN_CURSO');
--- → DEBE funcionar: el operador registra viajes ✓
+-- → Devuelve "1 row inserted" ✓ (tiene INSERT por ROL_OPERADOR)
 --
 -- SELECT * FROM TAXIRAPIDO_APP.FACTURAS;
--- → NO debe funcionar: ORA-00942 (sin acceso a finanzas) ✓
+-- → ORA-00942: table or view does not exist ✓ (sin acceso financiero)
 --
 -- SELECT * FROM TAXIRAPIDO_APP.VISTA_REPORTES_FINANCIEROS;
--- → NO debe funcionar: ORA-00942 ✓
+-- → ORA-00942 ✓
 
--- >> COMO ADMINISTRADOR (abrir nueva hoja con conexión ADMINISTRADOR)
--- CONNECT ADMINISTRADOR/Admin2024@XEPDB1
---
+-- >> CONEXIÓN: ADMINISTRADOR / Admin2024 / XEPDB1
 -- SELECT * FROM TAXIRAPIDO_APP.FACTURAS WHERE ROWNUM <= 3;
--- → DEBE funcionar: acceso total incluido finanzas ✓
+-- → Devuelve datos ✓ (tiene SELECT por ROL_ADMINISTRADOR)
 --
 -- SELECT * FROM TAXIRAPIDO_APP.VISTA_REPORTES_FINANCIEROS;
--- → DEBE funcionar: reporte financiero completo ✓
+-- → Reporte financiero completo ✓
 --
 -- SELECT * FROM TAXIRAPIDO_APP.VISTA_RENDIMIENTO_CONDUCTORES;
--- → DEBE funcionar: ranking de conductores ✓
+-- → Ranking de conductores ✓
 
--- >> COMO CONDUCTOR (abrir nueva hoja con conexión CONDUCTOR)
--- CONNECT CONDUCTOR/Conductor2024@XEPDB1
---
+-- >> CONEXIÓN: CONDUCTOR / Conductor2024 / XEPDB1
 -- SELECT * FROM TAXIRAPIDO_APP.VISTA_VIAJES_CONDUCTOR;
--- → DEBE funcionar: solo devuelve viajes donde USUARIO_ORACLE='CONDUCTOR' ✓
+-- → Solo viajes donde USUARIO_ORACLE = 'CONDUCTOR' ✓
+-- (Juan Pérez Gómez tiene USUARIO_ORACLE = 'CONDUCTOR')
+--
+-- SELECT * FROM TAXIRAPIDO_APP.VISTA_VEHICULO_CONDUCTOR;
+-- → Vehículo asignado a Juan Pérez (ABC123) ✓
 --
 -- SELECT * FROM TAXIRAPIDO_APP.VIAJES;
--- → NO debe funcionar: ORA-00942 (sin acceso directo a tabla) ✓
+-- → ORA-00942 ✓ (sin acceso directo a la tabla base)
 --
 -- INSERT INTO TAXIRAPIDO_APP.VIAJES
 --     (ID_CONDUCTOR,ID_VEHICULO,ORIGEN,DESTINO,TARIFA,ESTADO)
 -- VALUES (1,1,'A','B',5000,'EN_CURSO');
--- → NO debe funcionar: ORA-01031 insufficient privileges ✓
+-- → ORA-01031: insufficient privileges ✓
 
--- -------------------------------------------------------
 -- PARTE D: REPORTE EJECUTIVO INTEGRADO
--- Ejecutar como SYSTEM o como TAXIRAPIDO_APP
--- Demuestra que los 4 temas trabajan juntos:
---   · Tablas en tablespaces separados     (Arquitectura)
---   · IDs generados por secuencias        (Secuencias)
---   · Solo acceden usuarios autorizados   (Usuarios)
---   · Información presentada por vistas   (Vistas)
--- -------------------------------------------------------
+-- Demuestra que los 4 temas trabajan como un solo sistema:
+-- · Tablas en tablespaces separados         (Arquitectura — Carlos)
+-- · IDs generados automáticamente           (Secuencias — Brayan)
+-- · Acceso controlado por rol               (Usuarios — Tomás)
+-- · Información presentada por vistas       (Vistas — Cristian)
 
 SELECT 'REPORTE EJECUTIVO - TAXIRÁPIDO S.A.S.' AS "Sistema",
        TO_CHAR(SYSDATE,'DD/MM/YYYY HH24:MI')   AS "Generado"
 FROM DUAL;
 
--- Resumen operativo del día
 SELECT
     (SELECT COUNT(*) FROM TAXIRAPIDO_APP.CONDUCTORES
-     WHERE ESTADO = 'ACTIVO')                                 AS "Conductores Activos",
-    (SELECT COUNT(*) FROM TAXIRAPIDO_APP.VEHICULOS)           AS "Vehículos en Flota",
+     WHERE ESTADO = 'ACTIVO')                                AS "Conductores Activos",
+    (SELECT COUNT(*) FROM TAXIRAPIDO_APP.VEHICULOS)          AS "Vehículos en Flota",
     (SELECT COUNT(*) FROM TAXIRAPIDO_APP.VIAJES
-     WHERE ESTADO = 'EN_CURSO')                               AS "Viajes en Curso",
+     WHERE ESTADO = 'EN_CURSO')                              AS "Viajes en Curso",
     (SELECT COUNT(*) FROM TAXIRAPIDO_APP.VIAJES
-     WHERE TRUNC(FECHA_HORA) = TRUNC(SYSDATE))                AS "Viajes Registrados Hoy",
+     WHERE TRUNC(FECHA_HORA) = TRUNC(SYSDATE))               AS "Viajes Registrados Hoy",
     (SELECT NVL(SUM(MONTO_TOTAL),0) FROM TAXIRAPIDO_APP.FACTURAS
-     WHERE TRUNC(FECHA_EMISION) = TRUNC(SYSDATE))             AS "Ingresos Hoy ($)"
+     WHERE TRUNC(FECHA_EMISION) = TRUNC(SYSDATE))            AS "Ingresos Hoy ($)"
 FROM DUAL;
 
--- Ranking de conductores por ingresos
 SELECT * FROM TAXIRAPIDO_APP.VISTA_RENDIMIENTO_CONDUCTORES;
-
--- Estado de la flota en tiempo real
 SELECT * FROM TAXIRAPIDO_APP.VISTA_DISPONIBILIDAD_VEHICULOS;
-
--- Viajes activos en este momento
 SELECT * FROM TAXIRAPIDO_APP.VISTA_VIAJES_ACTIVOS;
-
--- Reporte financiero
 SELECT * FROM TAXIRAPIDO_APP.VISTA_REPORTES_FINANCIEROS;
 
 -- Estado de secuencias: capacidad restante
-SELECT SEQUENCE_NAME                               AS "Secuencia",
-       LAST_NUMBER                                 AS "Último ID Generado",
-       MAX_VALUE                                   AS "Capacidad Máxima",
-       (MAX_VALUE - LAST_NUMBER)                   AS "IDs Disponibles",
-       ROUND((LAST_NUMBER/MAX_VALUE)*100,2)        AS "% Usado"
+SELECT SEQUENCE_NAME                         AS "Secuencia",
+       LAST_NUMBER                           AS "Último ID",
+       MAX_VALUE                             AS "Máximo",
+       (MAX_VALUE - LAST_NUMBER)             AS "Disponibles",
+       ROUND((LAST_NUMBER/MAX_VALUE)*100,2)  AS "% Usado"
 FROM DBA_SEQUENCES
 WHERE SEQUENCE_OWNER = 'TAXIRAPIDO_APP'
   AND SEQUENCE_NAME LIKE 'SEQ_%'
 ORDER BY SEQUENCE_NAME;
 
--- Verificación final: tablespaces con su uso actual
-SELECT TS.TABLESPACE_NAME  AS "Tablespace",
-       TS.STATUS           AS "Estado",
-       TS.CONTENTS         AS "Tipo",
-       ROUND(NVL(SEG.BYTES_USADOS,0)/1024/1024,2) AS "Usado (MB)"
+-- Tablespaces con uso actual
+SELECT TS.TABLESPACE_NAME                                AS "Tablespace",
+       TS.STATUS                                         AS "Estado",
+       TS.CONTENTS                                       AS "Tipo",
+       ROUND(NVL(SEG.BYTES_USADOS,0)/1024/1024,2)       AS "Usado (MB)"
 FROM DBA_TABLESPACES TS
 LEFT JOIN (
     SELECT TABLESPACE_NAME, SUM(BYTES) AS BYTES_USADOS
