@@ -1,6 +1,6 @@
 # CODIGO CORREGIDO
 
-**Nota:** Recordar cambiar en SCRIPT 00 la ruta de los archivos por su ruta propia.
+**Nota:** Recordar cambiar en SCRIPT 00 la ruta de los archivos por su ruta propia. Ademas, al momento de correr un script sea en SYSTEM o en TAXIRAPIDO_APP solo estar conectado a ese esquema ya que puede generar conflictos. Al momento de correr SCRIPT 00 deben de crear una nueva conexion para el usuario TAXIRAPIDO_APP con contraseña TaxiApp2024
 
 ---
 
